@@ -51,93 +51,64 @@ void pageRank(Graph g, double *solution, double damping, double convergence)
 
   std::vector<double> score_old(numNodes);
   std::vector<double> score_new(numNodes);
-  // std::vector<int> not_out_edge(numNodes);
-  std::vector<int> has_out_edge(numNodes);
-  std::vector<int> has_in_edge(numNodes);
 
-  // std::fill(score_old.begin(), score_old.end(), equal_prob);
   #pragma omp parallel for
   for (int i = 0; i < numNodes; ++i)
   {
     score_old[i] = equal_prob;
   }
   
-  #pragma omp parallel for
-  for (int i = 0; i < has_out_edge.size(); i++)
-  {
-    has_out_edge[i] = outgoing_size(g, i);
-  }
-  #pragma omp parallel for
-  for (int i = 0; i < has_in_edge.size(); i++)
-  {
-    has_in_edge[i] = incoming_size(g, i);
-  }
   bool converged = false;
 
   while (!converged)
   {
-
     // step 1;
     #pragma omp parallel for
-    for (int i = 0; i < score_new.size(); i++)
+    for (int i = 0; i < numNodes; i++)
     {
       double sum = 0.0;
+      auto& vi = score_new[i];
       #pragma omp parallel for reduction(+:sum)
       for (auto j = incoming_begin(g, i); j != incoming_end(g, i); j++)
       {
-        sum += score_old[*j] / has_in_edge[*j];
+          sum += score_old[*j] / outgoing_size(g, *j);
       }
-      score_new[i] = sum;
-    }
+      
+      vi = damping * sum + (1.f - damping) / numNodes;
 
-    // step 2
-    // std::for_each(score_new.begin(), score_new.end(), [&](double &vi)
-    //               { vi = damping * vi + (1.f - damping) / numNodes; });
-    #pragma omp parallel for
-    for (int i  = 0 ; i < score_new.size(); i ++)
-    {
-      score_new[i] = damping * score_new[i] + (1.f - damping) / numNodes;
-    }
-    // step 3
-    #pragma omp parallel for
-    for (int i = 0; i < score_new.size(); i++)
-    {
-      auto&vi = score_new[i];
       #pragma omp parallel for reduction(+:vi)
-      for (int j = 0; j < score_new.size(); j++)
+      for (int j = 0; j < numNodes; j++)
       {
-        if (!has_out_edge[j])
+        if (!incoming_size(g, j))
         {
           vi += damping * score_old[j] / numNodes;
         }
       }
     }
+
     double global_diff = 0.0;
-    #pragma omp parallel for reduction(+:global_diff)
-    for (int i = 0; i < score_new.size(); i++)
+    #pragma omp parallel for reduction (+:global_diff)
+    for (int i = 0; i < numNodes; i++)
     {
       global_diff += std::abs(score_new[i] - score_old[i]);
     }
-
-    #pragma omp parallel for 
-    for (int i = 0; i < score_new.size(); i ++)
-    {
-      score_old[i] = score_new[i];
-    }
     converged = (global_diff < convergence);
-    // if (global_diff >= convergence)
-    // {
-    //   converged = true;
-    //   std::transform(score_new.begin(), score_new.end(), solution, [](double &x)
-    //                  { return x; });
-    // }
-    // else
-    // {
-    //   score_old = score_new;
-    // }
+    if (!converged)
+    {
+      # pragma omp parallel for
+      for (int i = 0; i < numNodes; i ++)
+      {
+        score_old[i] = score_new[i];
+      }
+    }
+      // score_old.swap(score_new);
   }
-  std::transform(score_new.begin(), score_new.end(), solution, [](double &x)
-                 { return x; });
+
+  # pragma omp parallel for
+  for (int i = 0; i < numNodes; i ++)
+  {
+    solution[i] = score_new[i];
+  }
   /*
      CS149 students: Implement the page rank algorithm here.  You
      are expected to parallelize the algorithm using openMP.  Your
